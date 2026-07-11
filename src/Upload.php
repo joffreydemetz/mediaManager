@@ -7,7 +7,7 @@
  * file that was distributed with this source code.
  */
 
-namespace JDZ\Image;
+namespace JDZ\MediaManager;
 
 use Symfony\Component\HttpFoundation\File\UploadedFile;
 use Symfony\Component\String\Slugger\AsciiSlugger;
@@ -147,7 +147,7 @@ class Upload
     $oMimeType = $file->getClientMimeType();
     $oSize = $file->getSize();
 
-    $file->move($this->path, $filename, $this->overwrite);
+    $file->move($this->path, $filename);
 
     if (!\file_exists($this->path . $filename)) {
       throw new \Exception('File was not found where it should have been uploaded..');
@@ -214,7 +214,7 @@ class Upload
     throw new \Exception('File exists .. maxTries reach to increment the file name');
   }
 
-  private function scaledImageSizes($x, $y, $cx, $cy): array
+  private function scaledImageSizes(int|float $x, int|float $y, int|float $cx, int|float $cy): array
   {
     $nx = $x;
     $ny = $y;
@@ -224,10 +224,14 @@ class Upload
       // Work out ratios
       if ($x > 0) {
         $rx = $cx / $x;
+      } else {
+        $rx = 0;
       }
 
       if ($y > 0) {
         $ry = $cy / $y;
+      } else {
+        $ry = 0;
       }
 
       // Use the lowest ratio, to ensure we don't go over the wanted image size
