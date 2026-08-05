@@ -1,7 +1,7 @@
 {
     "name": "jdz/mediamanager",
     "type": "library",
-    "description": "JDZ media manager",
+    "description": "Framework-agnostic media library management: browse, reshape and fill a media folder, with upload validation, watermarking and picker trees",
     "keywords": [
         "JDZ",
         "utilities",
