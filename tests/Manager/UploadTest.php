@@ -5,6 +5,7 @@ namespace JDZ\MediaManager\Tests\Manager;
 use JDZ\MediaManager\Manager\Uploader;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use Symfony\Component\HttpFoundation\File\File;
 use Symfony\Component\HttpFoundation\File\UploadedFile;
 
 class UploadTest extends TestCase
@@ -299,6 +300,46 @@ class UploadTest extends TestCase
     $this->assertSame('x.png', $result->originalName);
   }
 
+  public function testAMoveThatSilentlyDoesNothingIsReported(): void
+  {
+    $path = $this->scratchFile('x.png');
+    $this->makePng($path, 20, 20);
+
+    $file = new class($path, 'x.png', 'image/png', null, true) extends UploadedFile {
+      public function move(string $directory, ?string $name = null): File
+      {
+        return new File($directory . '/' . $name, false);
+      }
+    };
+
+    $result = $this->manager()->upload($file, 'empty');
+
+    $this->assertFalse($result->isSuccess());
+    $this->assertSame('MEDIAMANAGER_ERROR_OPERATION_FAILED', $result->key);
+    $this->assertSame(['%error%' => 'Uploaded file was not found where it should have been moved'], $result->params);
+  }
+
+  public function testAnUploadWhoseBytesCannotBeReadIsRefused(): void
+  {
+    $path = $this->scratchFile('gone.png');
+    $this->makePng($path, 20, 20);
+
+    $file = new class($path, 'gone.png', 'image/png', null, true) extends UploadedFile {
+      public function getSize(): int|false
+      {
+        return 0;
+      }
+    };
+
+    \unlink($path);
+
+    $result = $this->manager()->upload($file, 'empty');
+
+    $this->assertFalse($result->isSuccess());
+    $this->assertSame('MEDIAMANAGER_ERROR_UPLOAD_EXTENSION', $result->key);
+    $this->assertSame(['%ext%' => 'png', '%mime%' => ''], $result->params);
+  }
+
   // -- downscaling ----------------------------------------------------------
 
   public static function downscaleProvider(): array
@@ -329,6 +370,15 @@ class UploadTest extends TestCase
     $this->assertFalse($result->isSuccess());
     $this->assertSame('MEDIAMANAGER_ERROR_UPLOAD_EXTENSION', $result->key);
     $this->assertFileDoesNotExist($this->rootPath('empty/fake.png'));
+  }
+
+  public function testAPictureWhoseGeometryCannotBeReadIsKeptAsIs(): void
+  {
+    // finfo calls the header a GIF ; getimagesize wants more than a header
+    $result = $this->manager(['maxPictureLongSide' => 10])->upload($this->uploadedBytes('cut.gif', 'GIF89a', 'image/gif'), 'empty');
+
+    $this->assertTrue($result->isSuccess(), $result->key);
+    $this->assertSame('GIF89a', \file_get_contents($this->rootPath('empty/cut.gif')));
   }
 
   public function testAPictureThatCannotBeResizedIsKeptAsIs(): void

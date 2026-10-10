@@ -133,6 +133,16 @@ class ProtectMigrationTest extends TestCase
     $migration->migrate();
   }
 
+  public function testAMissingMediaRootIsAnError(): void
+  {
+    $migration = new ProtectMigration($this->manager(['rootPath' => $this->baseDir . '/nope'])->config());
+
+    $this->expectException(\RuntimeException::class);
+    $this->expectExceptionMessage('Media root not found');
+
+    $migration->migrate();
+  }
+
   public function testTheManagerExposesTheMigration(): void
   {
     $this->flatBackups();

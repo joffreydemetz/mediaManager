@@ -124,8 +124,13 @@ trait ManagerFixture
 
   protected function uploadedRaw(string $originalName, string $mime, int $bytes = 32): UploadedFile
   {
+    return $this->uploadedBytes($originalName, \str_repeat('x', $bytes), $mime);
+  }
+
+  protected function uploadedBytes(string $originalName, string $bytes, string $mime): UploadedFile
+  {
     $path = $this->scratchFile($originalName);
-    (new Filesystem())->dumpFile($path, \str_repeat('x', $bytes));
+    (new Filesystem())->dumpFile($path, $bytes);
 
     return new UploadedFile($path, $originalName, $mime, null, true);
   }

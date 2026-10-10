@@ -3,6 +3,7 @@
 namespace JDZ\MediaManager\Tests\Manager;
 
 use JDZ\MediaManager\Manager\MediaManager;
+use JDZ\MediaManager\Manager\PathResolver;
 use JDZ\MediaManager\ValueObject\MediaConfig;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
@@ -54,6 +55,14 @@ class CodecTest extends TestCase
   public function testDecodePathNormalisesLooseInput(string $wire, string $path): void
   {
     $this->assertSame($path, $this->manager()->decodePath($wire));
+  }
+
+  public function testPathsExposesTheResolver(): void
+  {
+    $paths = $this->manager()->paths();
+
+    $this->assertInstanceOf(PathResolver::class, $paths);
+    $this->assertSame('/srv/site/media', $paths->getRootPath());
   }
 
   public function testEncodePathTrimsOuterSlashes(): void

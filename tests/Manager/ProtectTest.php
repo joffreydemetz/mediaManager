@@ -2,8 +2,10 @@
 
 namespace JDZ\MediaManager\Tests\Manager;
 
+use JDZ\MediaManager\Manager\ImageProtector;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use Symfony\Component\Filesystem\Filesystem;
 
 class ProtectTest extends TestCase
 {
@@ -264,6 +266,41 @@ class ProtectTest extends TestCase
     $this->assertTrue($manager->deleteFolder('empty')->isSuccess());
 
     $this->assertDirectoryDoesNotExist($this->protectPath('empty'));
+  }
+
+  public function testABackupThatCannotFollowItsFileIsReported(): void
+  {
+    $manager = $this->manager();
+    $manager->protectImage('photos', 'a.jpg');
+
+    // the slot's parent folder is taken by a plain file : nothing can be filed there
+    (new Filesystem())->dumpFile($this->protectPath('empty'), 'in the way');
+
+    $file = $manager->moveFile('photos', 'a.jpg', 'empty');
+    $folder = $manager->moveFolder('photos', 'empty');
+
+    foreach ([$file, $folder] as $result) {
+      $this->assertFalse($result->isSuccess());
+      $this->assertSame('MEDIAMANAGER_ERROR_OPERATION_FAILED', $result->key);
+      $this->assertStringContainsString('Failed to create', $result->params['%error%']);
+    }
+
+    // the moves themselves went through ; the backup stayed where it was
+    $this->assertFileExists($this->rootPath('empty/a.jpg'));
+    $this->assertDirectoryExists($this->rootPath('empty/photos'));
+    $this->assertFileExists($this->protectPath('photos/a.jpg'));
+  }
+
+  public function testTheProtectorJailsItsOwnSlots(): void
+  {
+    $protector = new ImageProtector($this->manager()->config());
+    \mkdir($this->baseDir . '/protect/photos');
+    \copy($this->rootPath('photos/a.jpg'), $this->protectPath('photos/a.jpg'));
+
+    $this->assertTrue($protector->isProtected('photos/a.jpg'));
+    $this->assertFalse($protector->isProtected(''));
+    $this->assertFalse($protector->isProtected('/'));
+    $this->assertFalse($protector->isProtected('../media/photos/a.jpg'));
   }
 
   public function testOperationsOnUnprotectedFilesLeaveTheBackupsAlone(): void
