@@ -202,6 +202,29 @@ class FolderOpsTest extends TestCase
     $this->assertSame('MEDIAMANAGER_ERROR_SOURCE_FOLDER_INVALID', $result->key);
   }
 
+  public static function slashedNameProvider(): array
+  {
+    return [
+      'forward slash' => ['empty/moved'],
+      'backslash' => ['empty\moved'],
+      'wire separator' => ['empty[-]moved'],
+      'leading slash' => ['/moved'],
+    ];
+  }
+
+  #[DataProvider('slashedNameProvider')]
+  public function testRenameRefusesANameHoldingASeparator(string $newName): void
+  {
+    // a rename is not a move : a separator in the name must not relocate the folder
+    $result = $this->manager()->renameFolder('photos', $newName);
+
+    $this->assertFalse($result->isSuccess());
+    $this->assertSame('MEDIAMANAGER_ERROR_INVALID_PATH', $result->key);
+    $this->assertDirectoryExists($this->rootPath('photos'));
+    $this->assertDirectoryDoesNotExist($this->rootPath('empty/moved'));
+    $this->assertDirectoryDoesNotExist($this->rootPath('moved'));
+  }
+
   public function testRenameRefusesANewNameThatEscapes(): void
   {
     $result = $this->manager()->renameFolder('photos', '..[-]..[-]evil');

@@ -434,10 +434,15 @@ final class MediaManager
       return $guard;
     }
 
-    $newName = \trim($this->paths->decode($newName), '/');
+    $newName = \trim(\rawurldecode($newName));
 
     if ('' === $newName) {
       return OperationResult::fail('MEDIAMANAGER_ERROR_ENTER_FOLDER_NEW_NAME');
+    }
+
+    // a rename is not a move : the new name is one segment, nothing more
+    if (false === $this->isBareFolderName($newName)) {
+      return OperationResult::fail('MEDIAMANAGER_ERROR_INVALID_PATH');
     }
 
     $parts = \explode('/', $folder);
@@ -832,6 +837,18 @@ final class MediaManager
     }
 
     return null;
+  }
+
+  /**
+   * One folder name : no separator of any kind, not a traversal segment.
+   */
+  private function isBareFolderName(string $name): bool
+  {
+    if (\str_contains($name, '/') || \str_contains($name, '\\') || \str_contains($name, '[-]')) {
+      return false;
+    }
+
+    return '.' !== $name && '..' !== $name;
   }
 
   private function rename(string $from, string $to): ?OperationResult
