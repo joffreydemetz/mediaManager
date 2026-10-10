@@ -773,6 +773,11 @@ final class MediaManager
    */
   private function guardFolderIsEditable(string $folder): ?OperationResult
   {
+    // judge the folder the path lands on, not its spelling : `photos/../pages` is `pages`
+    if (null !== ($path = $this->paths->folderPath($folder))) {
+      $folder = $this->paths->relative($path);
+    }
+
     if ('' === $folder) {
       return OperationResult::fail('MEDIAMANAGER_ERROR_ROOT_CANNOT_BE_CHANGED');
     }

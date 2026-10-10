@@ -2,11 +2,61 @@
 
 namespace JDZ\MediaManager\Tests\Manager;
 
+use JDZ\MediaManager\Manager\MediaManager;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 class FolderOpsTest extends TestCase
 {
   use ManagerFixture;
+
+  // -- structural guard -----------------------------------------------------
+
+  public static function disguisedStructuralFolderProvider(): array
+  {
+    return [
+      'rename a system folder reached through ..' => [
+        static fn(MediaManager $manager) => $manager->renameFolder('photos/../pages', 'x'),
+        'MEDIAMANAGER_ERROR_ROOT_FOLDERS_CANNOT_BE_CHANGED',
+        'pages',
+      ],
+      'rename a system folder reached through .' => [
+        static fn(MediaManager $manager) => $manager->renameFolder('./pages', 'x'),
+        'MEDIAMANAGER_ERROR_ROOT_FOLDERS_CANNOT_BE_CHANGED',
+        'pages',
+      ],
+      'move a system folder reached through ..' => [
+        static fn(MediaManager $manager) => $manager->moveFolder('photos/../pages', 'empty'),
+        'MEDIAMANAGER_ERROR_ROOT_FOLDERS_CANNOT_BE_CHANGED',
+        'pages',
+      ],
+      'delete an empty system folder reached through ..' => [
+        static fn(MediaManager $manager) => $manager->deleteFolder('photos/../empty'),
+        'MEDIAMANAGER_ERROR_ROOT_FOLDERS_CANNOT_BE_CHANGED',
+        'empty',
+      ],
+      'delete the root reached through ..' => [
+        static fn(MediaManager $manager) => $manager->deleteFolder('photos/..'),
+        'MEDIAMANAGER_ERROR_ROOT_CANNOT_BE_CHANGED',
+        '',
+      ],
+      'rename the root reached through ..' => [
+        static fn(MediaManager $manager) => $manager->renameFolder('photos/..', 'x'),
+        'MEDIAMANAGER_ERROR_ROOT_CANNOT_BE_CHANGED',
+        '',
+      ],
+    ];
+  }
+
+  #[DataProvider('disguisedStructuralFolderProvider')]
+  public function testStructuralFoldersAreJudgedByWhereThePathLands(\Closure $operation, string $key, string $untouched): void
+  {
+    $result = $operation($this->manager(['systemFolders' => ['pages', 'empty']]));
+
+    $this->assertFalse($result->isSuccess());
+    $this->assertSame($key, $result->key);
+    $this->assertDirectoryExists($this->rootPath($untouched));
+  }
 
   // -- create ---------------------------------------------------------------
 
@@ -52,6 +102,16 @@ class FolderOpsTest extends TestCase
     $this->assertFalse($result->isSuccess());
     $this->assertSame('MEDIAMANAGER_ERROR_INVALID_PATH', $result->key);
     $this->assertDirectoryDoesNotExist($this->baseDir . '/evil');
+  }
+
+  public function testCreateUnderAFileFails(): void
+  {
+    $result = $this->manager()->createFolder('logo.png', 'inside');
+
+    $this->assertFalse($result->isSuccess());
+    $this->assertSame('MEDIAMANAGER_ERROR_OPERATION_FAILED', $result->key);
+    $this->assertArrayHasKey('%error%', $result->params);
+    $this->assertFileExists($this->rootPath('logo.png'));
   }
 
   // -- rename ---------------------------------------------------------------
@@ -142,6 +202,15 @@ class FolderOpsTest extends TestCase
     $this->assertSame('MEDIAMANAGER_ERROR_SOURCE_FOLDER_INVALID', $result->key);
   }
 
+  public function testRenameRefusesANewNameThatEscapes(): void
+  {
+    $result = $this->manager()->renameFolder('photos', '..[-]..[-]evil');
+
+    $this->assertFalse($result->isSuccess());
+    $this->assertSame('MEDIAMANAGER_ERROR_INVALID_PATH', $result->key);
+    $this->assertDirectoryExists($this->rootPath('photos'));
+  }
+
   // -- move -----------------------------------------------------------------
 
   public function testMoveUsesTheSubmittedDestination(): void
@@ -217,6 +286,14 @@ class FolderOpsTest extends TestCase
 
     $this->assertFalse($result->isSuccess());
     $this->assertSame('MEDIAMANAGER_ERROR_DESTINATION_FOLDER_ALREADY_EXISTS', $result->key);
+  }
+
+  public function testMoveOfAMissingFolderFails(): void
+  {
+    $result = $this->manager()->moveFolder('nope', 'empty');
+
+    $this->assertFalse($result->isSuccess());
+    $this->assertSame('MEDIAMANAGER_ERROR_SOURCE_FOLDER_NOT_FOUND', $result->key);
   }
 
   public function testMoveASystemFolderFails(): void
