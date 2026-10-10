@@ -469,6 +469,10 @@ final class MediaManager
       return $failure;
     }
 
+    if (null !== ($failure = $this->followBackup($oldPath, $newPath))) {
+      return $failure;
+    }
+
     return OperationResult::ok('MEDIAMANAGER_SUCCESS_DIRRENAME', [], ['folder' => $newFolder]);
   }
 
@@ -519,6 +523,10 @@ final class MediaManager
       return $failure;
     }
 
+    if (null !== ($failure = $this->followBackup($oldPath, $newPath))) {
+      return $failure;
+    }
+
     return OperationResult::ok('MEDIAMANAGER_SUCCESS_DIRMOVE', [], ['folder' => $newFolder]);
   }
 
@@ -551,6 +559,10 @@ final class MediaManager
     }
 
     $this->refreshStats();
+
+    if (null !== ($failure = $this->dropBackup($path))) {
+      return $failure;
+    }
 
     $parts = \explode('/', $folder);
     \array_pop($parts);
@@ -603,6 +615,10 @@ final class MediaManager
       return $failure;
     }
 
+    if (null !== ($failure = $this->followBackup($srcPath, $destPath))) {
+      return $failure;
+    }
+
     return OperationResult::ok('MEDIAMANAGER_SUCCESS_FILRENAME', [], ['file' => $newFileName]);
   }
 
@@ -643,6 +659,10 @@ final class MediaManager
       return $failure;
     }
 
+    if (null !== ($failure = $this->followBackup($srcPath, $destPath))) {
+      return $failure;
+    }
+
     return OperationResult::ok('MEDIAMANAGER_SUCCESS_FILMOVE', [], ['folder' => $newFolder, 'file' => $fileName]);
   }
 
@@ -669,6 +689,10 @@ final class MediaManager
     }
 
     $this->refreshStats();
+
+    if (null !== ($failure = $this->dropBackup($path))) {
+      return $failure;
+    }
 
     return OperationResult::ok('MEDIAMANAGER_SUCCESS_FILDELETE', ['%filename%' => $fileName]);
   }
@@ -719,6 +743,11 @@ final class MediaManager
 
   // ---------------------------------------------------------- protection ---
 
+  /**
+   * Back the original up and stamp the watermark over the file. The backup
+   * slot is the file's library-relative path, so it follows the file through
+   * renames and moves (see {@see ImageProtector}).
+   */
   public function protectImage(string $folder, string $fileName): OperationResult
   {
     $path = $this->paths->filePath($folder, $fileName);
@@ -727,7 +756,7 @@ final class MediaManager
       return OperationResult::fail('MEDIAMANAGER_ERROR_INVALID_PATH');
     }
 
-    return $this->protector()->protect($path, $fileName);
+    return $this->protector()->protect($path, $this->paths->relative($path));
   }
 
   public function unprotectImage(string $folder, string $fileName): OperationResult
@@ -738,12 +767,18 @@ final class MediaManager
       return OperationResult::fail('MEDIAMANAGER_ERROR_INVALID_PATH');
     }
 
-    return $this->protector()->unprotect($path, $fileName);
+    return $this->protector()->unprotect($path, $this->paths->relative($path));
   }
 
-  public function isProtected(string $fileName): bool
+  public function isProtected(string $folder, string $fileName): bool
   {
-    return $this->protector()->isProtected($fileName);
+    $path = $this->paths->filePath($folder, $fileName);
+
+    if (null === $path) {
+      return false;
+    }
+
+    return $this->protector()->isProtected($this->paths->relative($path));
   }
 
   // ------------------------------------------------------------ internals --
@@ -793,6 +828,34 @@ final class MediaManager
   {
     try {
       (new Filesystem())->rename($from, $to);
+    } catch (\Throwable $e) {
+      return OperationResult::fail('MEDIAMANAGER_ERROR_OPERATION_FAILED', ['%error%' => $e->getMessage()]);
+    }
+
+    return null;
+  }
+
+  /**
+   * A file or folder just moved : its protect backups go with it.
+   */
+  private function followBackup(string $fromAbs, string $toAbs): ?OperationResult
+  {
+    try {
+      $this->protector()->follow($this->paths->relative($fromAbs), $this->paths->relative($toAbs));
+    } catch (\Throwable $e) {
+      return OperationResult::fail('MEDIAMANAGER_ERROR_OPERATION_FAILED', ['%error%' => $e->getMessage()]);
+    }
+
+    return null;
+  }
+
+  /**
+   * A file or folder is gone : so are its protect backups.
+   */
+  private function dropBackup(string $abs): ?OperationResult
+  {
+    try {
+      $this->protector()->drop($this->paths->relative($abs));
     } catch (\Throwable $e) {
       return OperationResult::fail('MEDIAMANAGER_ERROR_OPERATION_FAILED', ['%error%' => $e->getMessage()]);
     }

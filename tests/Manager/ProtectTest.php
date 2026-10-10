@@ -19,8 +19,8 @@ class ProtectTest extends TestCase
     $this->assertSame('MEDIAMANAGER_SUCCESS_PROTECT', $result->key);
     $this->assertFalse($result->get('updated'));
 
-    $this->assertFileExists($this->protectPath('a.jpg'));
-    $this->assertSame($before, \file_get_contents($this->protectPath('a.jpg')));
+    $this->assertFileExists($this->protectPath('photos/a.jpg'));
+    $this->assertSame($before, \file_get_contents($this->protectPath('photos/a.jpg')));
     $this->assertNotSame($before, \file_get_contents($this->rootPath('photos/a.jpg')));
   }
 
@@ -34,7 +34,7 @@ class ProtectTest extends TestCase
 
     $this->assertTrue($result->isSuccess());
     $this->assertTrue($result->get('updated'));
-    $this->assertSame($before, \file_get_contents($this->protectPath('a.jpg')));
+    $this->assertSame($before, \file_get_contents($this->protectPath('photos/a.jpg')));
   }
 
   public function testUnprotectRestoresTheOriginalExactly(): void
@@ -48,20 +48,36 @@ class ProtectTest extends TestCase
     $this->assertTrue($result->isSuccess());
     $this->assertSame('MEDIAMANAGER_SUCCESS_UNPROTECT', $result->key);
     $this->assertSame($before, \file_get_contents($this->rootPath('photos/a.jpg')));
-    $this->assertFileDoesNotExist($this->protectPath('a.jpg'));
+    $this->assertFileDoesNotExist($this->protectPath('photos/a.jpg'));
   }
 
   public function testIsProtectedTracksTheBackup(): void
   {
     $manager = $this->manager();
 
-    $this->assertFalse($manager->isProtected('a.jpg'));
+    $this->assertFalse($manager->isProtected('photos', 'a.jpg'));
 
     $manager->protectImage('photos', 'a.jpg');
-    $this->assertTrue($manager->isProtected('a.jpg'));
+    $this->assertTrue($manager->isProtected('photos', 'a.jpg'));
+    $this->assertFalse($manager->isProtected('', 'a.jpg'));
 
     $manager->unprotectImage('photos', 'a.jpg');
-    $this->assertFalse($manager->isProtected('a.jpg'));
+    $this->assertFalse($manager->isProtected('photos', 'a.jpg'));
+  }
+
+  public function testIsProtectedRefusesTraversal(): void
+  {
+    $manager = $this->manager();
+    $manager->protectImage('photos', 'a.jpg');
+
+    $this->assertFalse($manager->isProtected('photos/..', 'photos/a.jpg'));
+    $this->assertFalse($manager->isProtected('..', 'watermark.png'));
+    $this->assertFalse($manager->isProtected('photos', ''));
+  }
+
+  public function testIsProtectedIsFalseWithoutAProtectPath(): void
+  {
+    $this->assertFalse($this->manager(['protectPath' => ''])->isProtected('photos', 'a.jpg'));
   }
 
   public function testProtectingANonImageFails(): void
@@ -79,7 +95,7 @@ class ProtectTest extends TestCase
 
     $this->assertFalse($result->isSuccess());
     $this->assertSame('MEDIAMANAGER_ERROR_OPERATION_FAILED', $result->key);
-    $this->assertFileDoesNotExist($this->protectPath('a.jpg'));
+    $this->assertFileDoesNotExist($this->protectPath('photos/a.jpg'));
   }
 
   public static function failureProvider(): array
@@ -105,6 +121,11 @@ class ProtectTest extends TestCase
         'MEDIAMANAGER_ERROR_OPERATION_FAILED',
         ['%error%' => 'Unable to open image {base}/watermark.png'],
       ],
+      'protect without a protect folder' => [
+        static fn(self $test) => $test->manager(['protectPath' => ''])->protectImage('photos', 'a.jpg'),
+        'MEDIAMANAGER_ERROR_OPERATION_FAILED',
+        ['%error%' => 'Protect folder not configured'],
+      ],
       'unprotect a missing file' => [
         static fn(self $test) => $test->manager()->unprotectImage('photos', 'nope.jpg'),
         'MEDIAMANAGER_ERROR_SOURCE_FILE_NOT_FOUND',
@@ -128,12 +149,12 @@ class ProtectTest extends TestCase
       'unprotect from an unreadable backup' => [
         static function (self $test) {
           // a folder where the backup file should be
-          \mkdir($test->protectPath('a.jpg'));
+          \mkdir($test->protectPath('photos/a.jpg'), 0777, true);
 
           return $test->manager()->unprotectImage('photos', 'a.jpg');
         },
         'MEDIAMANAGER_ERROR_OPERATION_FAILED',
-        ['%error%' => 'Failed to copy "{base}/protect/a.jpg" because file does not exist.'],
+        ['%error%' => 'Failed to copy "{base}/protect/photos/a.jpg" because file does not exist.'],
       ],
     ];
   }
@@ -151,25 +172,118 @@ class ProtectTest extends TestCase
     );
   }
 
-  public function testKnownLimitationSameNamedFilesShareOneBackupSlot(): void
+  public function testSameNamedFilesHaveTheirOwnBackupSlot(): void
   {
-    // NOT a contract : backups are filed flat, by file name (see ImageProtector),
-    // so photos/a.jpg and a.jpg share protect/a.jpg. Flip this test once backups
-    // get a path-qualified slot.
     $this->makeJpg($this->rootPath('a.jpg'), 60, 60);
+    $rootOriginal = \file_get_contents($this->rootPath('a.jpg'));
     $manager = $this->manager();
 
     $manager->protectImage('photos', 'a.jpg');
 
-    $this->assertTrue($manager->isProtected('a.jpg'), 'the untouched root a.jpg already reads as protected');
+    $this->assertFalse($manager->isProtected('', 'a.jpg'), 'the untouched root a.jpg is not protected');
 
     $result = $manager->protectImage('', 'a.jpg');
 
-    $this->assertTrue($result->get('updated'));
+    $this->assertFalse($result->get('updated'));
+    $this->assertSame($rootOriginal, \file_get_contents($this->protectPath('a.jpg')));
     $this->assertSame(
-      [30, 20],
+      [60, 60],
       \array_slice(\getimagesize($this->rootPath('a.jpg')), 0, 2),
-      'the root a.jpg was re-stamped from photos/a.jpg\'s original',
+      'the root a.jpg was stamped from its own original',
     );
+    $this->assertFileExists($this->protectPath('photos/a.jpg'));
+  }
+
+  // -- backups follow their file --------------------------------------------
+
+  public function testRenameFileMovesTheBackup(): void
+  {
+    $manager = $this->manager();
+    $before = \file_get_contents($this->rootPath('photos/a.jpg'));
+    $manager->protectImage('photos', 'a.jpg');
+
+    $this->assertTrue($manager->renameFile('photos', 'a.jpg', 'b')->isSuccess());
+
+    $this->assertFileDoesNotExist($this->protectPath('photos/a.jpg'));
+    $this->assertTrue($manager->isProtected('photos', 'b.jpg'));
+    $this->assertTrue($manager->unprotectImage('photos', 'b.jpg')->isSuccess());
+    $this->assertSame($before, \file_get_contents($this->rootPath('photos/b.jpg')));
+  }
+
+  public function testMoveFileMovesTheBackup(): void
+  {
+    $manager = $this->manager();
+    $manager->protectImage('photos', 'a.jpg');
+
+    $this->assertTrue($manager->moveFile('photos', 'a.jpg', 'empty')->isSuccess());
+
+    $this->assertFileDoesNotExist($this->protectPath('photos/a.jpg'));
+    $this->assertFileExists($this->protectPath('empty/a.jpg'));
+    $this->assertTrue($manager->isProtected('empty', 'a.jpg'));
+  }
+
+  public function testDeleteFileDropsTheBackup(): void
+  {
+    $manager = $this->manager();
+    $manager->protectImage('photos', 'a.jpg');
+
+    $this->assertTrue($manager->deleteFile('photos', 'a.jpg')->isSuccess());
+
+    $this->assertFileDoesNotExist($this->protectPath('photos/a.jpg'));
+  }
+
+  public function testRenameFolderMovesItsBackups(): void
+  {
+    $manager = $this->manager();
+    $manager->protectImage('photos', 'a.jpg');
+    $manager->protectImage('photos/sub', 'deep.jpg');
+
+    $this->assertTrue($manager->renameFolder('photos', 'images')->isSuccess());
+
+    $this->assertDirectoryDoesNotExist($this->protectPath('photos'));
+    $this->assertTrue($manager->isProtected('images', 'a.jpg'));
+    $this->assertTrue($manager->isProtected('images/sub', 'deep.jpg'));
+  }
+
+  public function testMoveFolderMovesItsBackups(): void
+  {
+    $manager = $this->manager();
+    $manager->protectImage('photos', 'a.jpg');
+
+    $this->assertTrue($manager->moveFolder('photos', 'empty')->isSuccess());
+
+    $this->assertDirectoryDoesNotExist($this->protectPath('photos'));
+    $this->assertTrue($manager->isProtected('empty/photos', 'a.jpg'));
+  }
+
+  public function testDeleteFolderDropsItsStaleBackups(): void
+  {
+    $manager = $this->manager();
+    $this->makeJpg($this->protectPath('empty/stale.jpg'), 5, 5);
+
+    $this->assertTrue($manager->deleteFolder('empty')->isSuccess());
+
+    $this->assertDirectoryDoesNotExist($this->protectPath('empty'));
+  }
+
+  public function testOperationsOnUnprotectedFilesLeaveTheBackupsAlone(): void
+  {
+    $manager = $this->manager();
+
+    $this->assertTrue($manager->renameFile('photos', 'a.jpg', 'b')->isSuccess());
+    $this->assertTrue($manager->moveFile('photos', 'b.jpg', 'empty')->isSuccess());
+    $this->assertTrue($manager->renameFolder('photos', 'images')->isSuccess());
+    $this->assertTrue($manager->deleteFile('empty', 'b.jpg')->isSuccess());
+
+    $this->assertSame([], \glob($this->protectDir . '/*'), 'no backup folder was created');
+  }
+
+  public function testOperationsWorkWithoutAProtectPath(): void
+  {
+    $manager = $this->manager(['protectPath' => '']);
+
+    $this->assertTrue($manager->renameFile('photos', 'a.jpg', 'b')->isSuccess());
+    $this->assertTrue($manager->moveFolder('photos', 'empty')->isSuccess());
+    $this->assertTrue($manager->deleteFile('empty/photos', 'b.jpg')->isSuccess());
   }
 }
