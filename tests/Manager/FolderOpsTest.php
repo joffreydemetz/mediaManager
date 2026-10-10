@@ -170,6 +170,18 @@ class FolderOpsTest extends TestCase
     $this->assertTrue($manager->renameFolder('pages', 'x')->isSuccess());
   }
 
+  public function testTheSystemFolderGuardIgnoresCase(): void
+  {
+    // the config spells it one way, the disk (or the request) another
+    $manager = $this->manager(['systemFolders' => ['Pages']]);
+
+    $result = $manager->renameFolder('pages', 'x');
+
+    $this->assertFalse($result->isSuccess());
+    $this->assertSame('MEDIAMANAGER_ERROR_ROOT_FOLDERS_CANNOT_BE_CHANGED', $result->key);
+    $this->assertDirectoryExists($this->rootPath('pages'));
+  }
+
   public function testRenameWithoutANameFails(): void
   {
     $result = $this->manager()->renameFolder('photos', '');

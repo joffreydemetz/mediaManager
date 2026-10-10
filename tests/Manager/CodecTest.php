@@ -66,6 +66,8 @@ class CodecTest extends TestCase
     return [
       'listed' => ['pages', true],
       'listed nested' => ['photos/locked', true],
+      'listed, other case' => ['Pages', true],
+      'listed nested, other case' => ['Photos/LOCKED', true],
       'not listed' => ['photos', false],
       'below a listed one' => ['pages/sub', false],
       'the root' => ['', false],
@@ -73,7 +75,7 @@ class CodecTest extends TestCase
   }
 
   #[DataProvider('systemFolderProvider')]
-  public function testIsSystemFolderMatchesTheListExactly(string $folder, bool $expected): void
+  public function testIsSystemFolderMatchesTheListCaseInsensitively(string $folder, bool $expected): void
   {
     $this->assertSame($expected, $this->manager()->isSystemFolder($folder));
   }

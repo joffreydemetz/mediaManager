@@ -106,9 +106,21 @@ final class MediaConfig
     return self::accepted($this->mimesDocument, $this->extsDocument);
   }
 
+  /**
+   * Case does not count : the disk may not care, and the request spells the
+   * folder however the browser last saw it.
+   */
   public function isSystemFolder(string $folder): bool
   {
-    return \in_array($folder, $this->systemFolders, true);
+    $folder = \mb_strtolower(\trim(\str_replace('\\', '/', $folder), '/'));
+
+    foreach ($this->systemFolders as $systemFolder) {
+      if ($folder === \mb_strtolower(\trim(\str_replace('\\', '/', (string)$systemFolder), '/'))) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   public function toArray(): array
