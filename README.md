@@ -39,7 +39,8 @@ $manager = new MediaManager(MediaConfig::fromArray([
 $manager->getFilesystem('photos/2024', 'images', $thumbResolver);
 // ['value' => 'photos/2024', 'name' => '2024', 'previous' => 'photos',
 //  'folders' => [['value','name','previous','type','icon'], ...],
-//  'files'   => [['value','name','ext','thumb'], ...]]
+//  'files'   => [['value','name','ext','thumb'], ...],
+//  'errors'  => []]   // [['key' => 'MEDIAMANAGER_ERROR_ROOT_NOT_FOUND', 'params' => [...]]] when the root folder is missing
 
 $manager->getBreadcrumbs('photos/2024');  // [['folder' => '', 'title' => 'Medias'], ['folder' => 'photos', ...], ...]
 $manager->getFolderSelectList();          // [['value','name','level'], ...], flattened, 'Racine' first
@@ -90,7 +91,12 @@ if (true === $result->isSuccess()) {
 }
 ```
 
-Validates mime and weight against the config, slugs the name (camelCase split, transliterated, lowercased, dash-separated), resolves collisions with `-1`, `-2`, `-3` unless `$force`, then downscales oversized pictures in place (GD via Imagine, EXIF autorotate). A failed resize never fails the upload.
+What gets in is decided by the name the file will be **stored** under and by its **bytes**, never by the mime type the browser announced:
+
+1. the extension must sit in `extsImage` or `extsDocument` (compared lowercased; no extension, no upload) — otherwise `MEDIAMANAGER_ERROR_UPLOAD_FILE_UNAUTH_EXT`;
+2. the mime `finfo` reads off the bytes must belong to that extension's family (`jpg` ↔ `image/jpeg`, `pdf` ↔ `application/pdf`, the OOXML / OpenDocument families, …) — a PNG renamed `.jpg` or a script named `.png` is `MEDIAMANAGER_ERROR_UPLOAD_EXTENSION`. An extension the built-in table does not know falls back on the configured `mimes*` lists.
+
+`jpeg` and `jfif` are stored as `jpg`. Weight is checked against the config, the name is slugged (camelCase split, transliterated, lowercased, dash-separated), collisions get `-1`, `-2`, `-3` unless `$force`, then oversized pictures are downscaled in place (GD via Imagine, EXIF autorotate). A failed resize never fails the upload. The `mimes*` lists still feed Dropzone's `acceptedFiles` (`getDropzoneParams()`).
 
 Library quotas are enforced up front — `$manager->getStats()` exposes the counters and the verdict:
 
@@ -103,10 +109,19 @@ $stats = $manager->getStats();   // numFiles, weightFiles (Mo), maxNumFiles, max
 ```php
 $manager->protectImage('photos', 'img.jpg');    // backs the original up, stamps the watermark over it
 $manager->unprotectImage('photos', 'img.jpg');  // restores it, drops the backup
-$manager->isProtected('img.jpg');
+$manager->isProtected('photos', 'img.jpg');
 ```
 
-Backups live flat under `protectPath`, filed under the file's own name — two files sharing a basename in different folders share one backup slot.
+A backup is filed under the file's library-relative path: `photos/2024/img.jpg` backs up to `<protectPath>/photos/2024/img.jpg`. Backups follow their file through `renameFile()`, `moveFile()`, `renameFolder()` and `moveFolder()`, and go away with `deleteFile()` / `deleteFolder()`. A backup that cannot follow its file turns the operation's result into `MEDIAMANAGER_ERROR_OPERATION_FAILED` (the file itself has moved).
+
+Coming from 2.x, where backups were flat (`<protectPath>/img.jpg`), move them once:
+
+```bash
+php vendor/bin/migrate-protect public/media public/protect           # dry run: what would move, what needs a human
+php vendor/bin/migrate-protect public/media public/protect --write   # move the unambiguous ones
+```
+
+A flat backup moves when exactly one file of that name exists in the library and its slot is free. The rest is reported and left alone: the same name in several folders (settle by hand), no such file (orphan), a slot already taken. Same report from `$manager->migrateProtectBackups($write)`.
 
 ## Paths and safety
 
@@ -123,8 +138,8 @@ The package never renders a message. It returns keys, which the consumer transla
 | **Success** | `MEDIAMANAGER_SUCCESS_DIRCREATE`, `_DIRRENAME`, `_DIRMOVE`, `_DIRDELETE`, `_FILRENAME`, `_FILMOVE`, `_FILDELETE` (`%filename%`), `_PROTECT`, `_UNPROTECT` |
 | **Folders** | `MEDIAMANAGER_ERROR_ROOT_CANNOT_BE_CHANGED`, `_ROOT_FOLDERS_CANNOT_BE_CHANGED`, `_ENTER_FOLDER_NAME`, `_ENTER_FOLDER_NEW_NAME`, `_FOLDER_NAME_UNCHANGED`, `_FOLDER_NOT_EMPTY`, `_SOURCE_FOLDER_INVALID`, `_SOURCE_FOLDER_NOT_FOUND`, `_DESTINATION_FOLDER_NOT_FOUND`, `_DESTINATION_FOLDER_ALREADY_EXISTS`, `_CANNOT_MOVE_INTO_ITSELF` |
 | **Files** | `MEDIAMANAGER_ERROR_NO_FILE_SPECIFIED`, `_ENTER_FILE_NEW_NAME`, `_FILE_NAME_UNCHANGED`, `_SOURCE_FILE_NOT_FOUND`, `_DESTINATION_FILE_ALREADY_EXISTS`, `_SAME_FILEPATH`, `_NOT_AN_IMAGE`, `_PROTECT_ORIGINAL_NOT_FOUND` |
-| **Uploads** | `MEDIAMANAGER_ERROR_UPLOAD_FILE_TOO_BIG` (`%maxFileSize%`), `_UPLOAD_FILE_UNAUTH_EXT` (`%authExts%`), `_UPLOAD_TOO_MANY_FILES` (`%maxFileCount%`), `_UPLOAD_FILESYSTEM_FULL` (`%maxWeightFiles%`) |
-| **Generic** | `MEDIAMANAGER_ERROR_INVALID_PATH`, `MEDIAMANAGER_ERROR_OPERATION_FAILED` (`%error%`) |
+| **Uploads** | `MEDIAMANAGER_ERROR_UPLOAD_FILE_TOO_BIG` (`%maxFileSize%`), `_UPLOAD_FILE_UNAUTH_EXT` (`%authExts%`), `_UPLOAD_EXTENSION` (`%ext%`, `%mime%` — the bytes do not match the extension), `_UPLOAD_TOO_MANY_FILES` (`%maxFileCount%`), `_UPLOAD_FILESYSTEM_FULL` (`%maxWeightFiles%`) |
+| **Generic** | `MEDIAMANAGER_ERROR_INVALID_PATH`, `MEDIAMANAGER_ERROR_ROOT_NOT_FOUND` (`%path%`), `MEDIAMANAGER_ERROR_OPERATION_FAILED` (`%error%`) |
 
 ## Trees
 
@@ -149,6 +164,13 @@ $documents = (new DocumentTree())
 // [['id','title','text','icon','url','ext'], ...]
 ```
 
+## Upgrading from 2.x
+
+- **Uploads are checked on the stored extension and the bytes.** The browser's mime type no longer lets a file in: list every extension you accept in `extsImage` / `extsDocument` (add `jfif` if your users drop those), and expect the new `MEDIAMANAGER_ERROR_UPLOAD_EXTENSION` key (`%ext%`, `%mime%`) in your translations.
+- **`isProtected(string $folder, string $fileName)`** takes the folder, like `protectImage()`; the one-argument form is gone.
+- **Backups moved** from `<protectPath>/<name>` to `<protectPath>/<relative path>`: run `vendor/bin/migrate-protect` once per library (see *Watermarking*). Until then `unprotectImage()` answers `MEDIAMANAGER_ERROR_PROTECT_ORIGINAL_NOT_FOUND` for the old slots and `protectImage()` would back the watermarked file up as if it were pristine.
+- `decodePath()` keeps a `+` as a plus (`rawurldecode`); `renameFolder()` refuses a name holding `/`, `\` or `[-]`; `isSystemFolder()` ignores case; a missing root folder makes `getFilesystem()` / `getStats()` answer empty results carrying `MEDIAMANAGER_ERROR_ROOT_NOT_FOUND` instead of throwing (`getFilesystem()` now always has an `errors` key).
+
 ## Upgrading from 1.x
 
 `JDZ\MediaManager\Upload` is gone — its work is done by `MediaManager::upload()`, which takes an explicit target folder, enforces library quotas and returns an `UploadResult` instead of throwing. `Tree/` is unchanged.
@@ -158,6 +180,13 @@ $documents = (new DocumentTree())
 ```bash
 composer test
 ```
+
+## Changelog
+
+- **3.0.0** - Uploads are accepted on the stored extension (`exts*` lists) and the mime `finfo` reads off the bytes, never on the announced mime (new `MEDIAMANAGER_ERROR_UPLOAD_EXTENSION`; `jfif` stored as `jpg`); protect backups are filed under the file's relative path, follow renames, moves and deletes, `isProtected(folder, file)`, `bin/migrate-protect` for the 2.x flat slots; `decodePath()` keeps `+`; `renameFolder()` refuses separators; the system-folder guard ignores case; a missing root answers `MEDIAMANAGER_ERROR_ROOT_NOT_FOUND` instead of throwing.
+- **2.0.1** - A system folder spelled `photos/../pages` or `./pages` could be renamed, moved or deleted: the guard judges where the path lands.
+- **2.0.0** - `Upload` replaced by `MediaManager::upload()` (explicit target folder, library quotas, `UploadResult`); the manager layer.
+- **1.0.0** - Initial release, from Callisto.
 
 ## License
 
