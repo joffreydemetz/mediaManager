@@ -47,7 +47,7 @@ final class PathResolver
    */
   public function decode(string $wire): string
   {
-    $path = \urldecode($wire);
+    $path = \rawurldecode($wire);
     $path = \str_replace('[-]', '/', $path);
     $path = \str_replace('\\', '/', $path);
 

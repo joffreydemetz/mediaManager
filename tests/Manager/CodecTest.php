@@ -46,6 +46,7 @@ class CodecTest extends TestCase
       'url-encoded' => ['mes%20photos%5B-%5D%C3%A9t%C3%A9', 'mes photos/été'],
       'backslashes' => ['photos\\sub', 'photos/sub'],
       'outer slashes' => ['/photos[-]sub/', 'photos/sub'],
+      'a plus sign is a plus sign' => ['mes+photos[-]2024+2025', 'mes+photos/2024+2025'],
     ];
   }
 

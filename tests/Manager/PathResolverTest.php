@@ -24,6 +24,13 @@ class PathResolverTest extends TestCase
     $this->assertSame('mes photos/été', $this->resolver()->decode('mes%20photos%5B-%5D%C3%A9t%C3%A9'));
   }
 
+  public function testDecodeKeepsAPlusSign(): void
+  {
+    // form decoding is the request's job, done once already : `+` is a plus
+    $this->assertSame('a+b/c+d', $this->resolver()->decode('a+b[-]c+d'));
+    $this->assertSame('a+b', $this->resolver()->decode('a%2Bb'));
+  }
+
   public function testDecodeTrimsAndNormalisesSeparators(): void
   {
     $this->assertSame('photos/sub', $this->resolver()->decode('/photos\\sub/'));
