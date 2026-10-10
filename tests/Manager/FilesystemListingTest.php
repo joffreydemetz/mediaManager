@@ -96,6 +96,25 @@ class FilesystemListingTest extends TestCase
     $this->assertSame(['empty', 'pages', 'photos'], \array_column($fs['folders'], 'name'));
   }
 
+  public function testAMissingRootListsNothingWithAnError(): void
+  {
+    $fs = $this->manager(['rootPath' => $this->baseDir . '/nope'])->getFilesystem('photos');
+
+    $this->assertSame('', $fs['value']);
+    $this->assertFalse($fs['previous']);
+    $this->assertSame([], $fs['folders']);
+    $this->assertSame([], $fs['files']);
+    $this->assertSame([[
+      'key' => 'MEDIAMANAGER_ERROR_ROOT_NOT_FOUND',
+      'params' => ['%path%' => $this->baseDir . '/nope'],
+    ]], $fs['errors']);
+  }
+
+  public function testAListingCarriesAnEmptyErrorList(): void
+  {
+    $this->assertSame([], $this->manager()->getFilesystem('photos')['errors']);
+  }
+
   public static function filterProvider(): array
   {
     return [

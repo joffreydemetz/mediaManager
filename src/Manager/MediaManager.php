@@ -102,7 +102,15 @@ final class MediaManager
       'previous' => false,
       'folders' => [],
       'files' => [],
+      'errors' => [],
     ];
+
+    // nothing to list, nothing to throw : the consumer shows the error
+    if (null !== ($missing = $this->missingRootError())) {
+      $filesystem['errors'][] = $missing;
+
+      return $filesystem;
+    }
 
     if ('' !== $folder) {
       $parts = \explode('/', $folder);
@@ -346,6 +354,17 @@ final class MediaManager
   public function getStats(): FilesystemStats
   {
     if (null === $this->stats) {
+      if (null !== ($missing = $this->missingRootError())) {
+        return $this->stats = new FilesystemStats(
+          0,
+          0,
+          $this->config->maxNumFiles,
+          $this->config->maxWeightFiles,
+          false,
+          [$missing],
+        );
+      }
+
       $numFiles = 0;
       $totalBytes = 0;
 
@@ -806,6 +825,24 @@ final class MediaManager
   private function protector(): ImageProtector
   {
     return $this->protector ??= new ImageProtector($this->config);
+  }
+
+  /**
+   * The error entry of a library whose root folder is not there, null when
+   * it is.
+   *
+   * @return array{key: string, params: array}|null
+   */
+  private function missingRootError(): ?array
+  {
+    if (true === @\is_dir($this->paths->getRootPath())) {
+      return null;
+    }
+
+    return [
+      'key' => 'MEDIAMANAGER_ERROR_ROOT_NOT_FOUND',
+      'params' => ['%path%' => $this->paths->getRootPath()],
+    ];
   }
 
   /**

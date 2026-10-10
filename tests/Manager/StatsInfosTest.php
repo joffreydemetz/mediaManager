@@ -88,6 +88,26 @@ class StatsInfosTest extends TestCase
     $this->assertSame(10, $manager->getStats()->numFiles);
   }
 
+  public function testStatsOfAMissingRootAreEmptyWithAnError(): void
+  {
+    $manager = $this->manager(['rootPath' => $this->baseDir . '/nope']);
+
+    $stats = $manager->getStats();
+
+    $this->assertSame(0, $stats->numFiles);
+    $this->assertSame(0, $stats->weightFiles);
+    $this->assertFalse($stats->uploadable);
+    $this->assertSame([[
+      'key' => 'MEDIAMANAGER_ERROR_ROOT_NOT_FOUND',
+      'params' => ['%path%' => $this->baseDir . '/nope'],
+    ]], $stats->errors);
+
+    $result = $manager->upload($this->uploadedPng('x.png'), '');
+
+    $this->assertFalse($result->isSuccess());
+    $this->assertSame('MEDIAMANAGER_ERROR_ROOT_NOT_FOUND', $result->key);
+  }
+
   // -- folder infos ---------------------------------------------------------
 
   public function testFolderInfosCountRecursively(): void
