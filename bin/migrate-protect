@@ -1,0 +1,82 @@
+#!/usr/bin/env php
+<?php
+
+/**
+ * (c) Joffrey Demetz <joffrey.demetz@gmail.com>
+ *
+ * For the full copyright and license information, please view the LICENSE
+ * file that was distributed with this source code.
+ */
+
+/*
+ * Move the 2.x flat protect backups to their 3.x slot.
+ *
+ *   php vendor/bin/migrate-protect <mediaRoot> <protectPath> [--write]
+ *
+ * Dry run by default : prints what would move and what needs a human
+ * (same name in several folders, no such file, slot already taken).
+ * Run it once per site after upgrading to jdz/mediamanager 3.0.
+ */
+
+declare(strict_types=1);
+
+foreach ([__DIR__ . '/../vendor/autoload.php', __DIR__ . '/../../../autoload.php'] as $autoload) {
+  if (true === \is_file($autoload)) {
+    require $autoload;
+    break;
+  }
+}
+
+use JDZ\MediaManager\Manager\ProtectMigration;
+use JDZ\MediaManager\ValueObject\MediaConfig;
+
+$args = \array_slice($argv, 1);
+$write = \in_array('--write', $args, true);
+$paths = \array_values(\array_filter($args, static fn(string $arg): bool => '--write' !== $arg));
+
+if (2 !== \count($paths)) {
+  \fwrite(STDERR, "usage: migrate-protect <mediaRoot> <protectPath> [--write]\n");
+  exit(1);
+}
+
+try {
+  $migration = new ProtectMigration(MediaConfig::fromArray([
+    'rootPath' => $paths[0],
+    'protectPath' => $paths[1],
+  ]));
+
+  $report = $migration->migrate($write);
+} catch (\Throwable $e) {
+  \fwrite(STDERR, 'error: ' . $e->getMessage() . "\n");
+  exit(1);
+}
+
+echo $write ? "write mode\n" : "dry run (add --write to move)\n";
+
+echo \sprintf("\n%d backup(s) %s:\n", \count($report['moves']), $write ? 'moved' : 'to move');
+
+foreach ($report['moves'] as $move) {
+  echo '  ' . $move['from'] . ' -> ' . $move['to'] . "\n";
+}
+
+echo \sprintf("\n%d already in place (root files)\n", \count($report['inPlace']));
+
+echo \sprintf("\n%d ambiguous (same name in several folders, settle by hand):\n", \count($report['ambiguous']));
+
+foreach ($report['ambiguous'] as $name => $candidates) {
+  echo '  ' . $name . ' : ' . \implode(', ', $candidates) . "\n";
+}
+
+echo \sprintf("\n%d orphan(s) (no such file in the library, left alone):\n", \count($report['orphans']));
+
+foreach ($report['orphans'] as $name) {
+  echo '  ' . $name . "\n";
+}
+
+echo \sprintf("\n%d conflict(s) (slot already taken, left alone):\n", \count($report['conflicts']));
+
+foreach ($report['conflicts'] as $name => $slot) {
+  echo '  ' . $name . ' : ' . $slot . " exists\n";
+}
+
+exit(0);

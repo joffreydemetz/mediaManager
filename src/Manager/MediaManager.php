@@ -781,6 +781,16 @@ final class MediaManager
     return $this->protector()->isProtected($this->paths->relative($path));
   }
 
+  /**
+   * Move the 2.x flat backups (`protect/<name>`) to their 3.x slot
+   * (`protect/<relative path>`). Dry run unless `$write`. See
+   * {@see ProtectMigration} and `bin/migrate-protect`.
+   */
+  public function migrateProtectBackups(bool $write = false): array
+  {
+    return (new ProtectMigration($this->config))->migrate($write);
+  }
+
   // ------------------------------------------------------------ internals --
 
   private function uploader(): Uploader
