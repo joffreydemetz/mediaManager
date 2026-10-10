@@ -98,20 +98,28 @@ trait ManagerFixture
   /**
    * A test-mode UploadedFile over a freshly written scratch file.
    */
-  protected function uploadedPng(string $originalName, int $width = 20, int $height = 20): UploadedFile
+  protected function uploadedPng(string $originalName, int $width = 20, int $height = 20, string $clientMime = 'image/png'): UploadedFile
   {
     $path = $this->scratchFile($originalName);
     $this->makePng($path, $width, $height);
 
-    return new UploadedFile($path, $originalName, 'image/png', null, true);
+    return new UploadedFile($path, $originalName, $clientMime, null, true);
   }
 
-  protected function uploadedJpg(string $originalName, int $width = 20, int $height = 20): UploadedFile
+  protected function uploadedJpg(string $originalName, int $width = 20, int $height = 20, string $clientMime = 'image/jpeg'): UploadedFile
   {
     $path = $this->scratchFile($originalName);
     $this->makeJpg($path, $width, $height);
 
-    return new UploadedFile($path, $originalName, 'image/jpeg', null, true);
+    return new UploadedFile($path, $originalName, $clientMime, null, true);
+  }
+
+  protected function uploadedPdf(string $originalName): UploadedFile
+  {
+    $path = $this->scratchFile($originalName);
+    $this->makePdf($path);
+
+    return new UploadedFile($path, $originalName, 'application/pdf', null, true);
   }
 
   protected function uploadedRaw(string $originalName, string $mime, int $bytes = 32): UploadedFile

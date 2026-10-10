@@ -22,12 +22,56 @@ use function Symfony\Component\String\u;
  * Validates one uploaded file, gives it a library-friendly name, moves it in
  * and downsizes it when it is a needlessly large picture.
  *
+ * What gets in is decided by the name the file will be STORED under and by
+ * its bytes, never by the mime type the client announced : the extension must
+ * sit in the configured lists, and the mime `finfo` reads off the bytes must
+ * belong to that extension's family.
+ *
  * @author Joffrey Demetz <joffrey.demetz@gmail.com>
  */
 final class Uploader
 {
   /** How many `-1`, `-2`, .. suffixes to try before giving up on a collision */
   private const MAX_COLLISION_TRIES = 4;
+
+  /** Extensions stored under another name */
+  private const EXTENSION_ALIASES = ['jpeg' => 'jpg', 'jfif' => 'jpg'];
+
+  /**
+   * The mime types `finfo` may report for a stored extension. An extension
+   * missing here falls back on the configured mime lists.
+   */
+  private const EXTENSION_MIMES = [
+    'jpg' => ['image/jpeg'],
+    'png' => ['image/png'],
+    'gif' => ['image/gif'],
+    'webp' => ['image/webp'],
+    'avif' => ['image/avif'],
+    'bmp' => ['image/bmp', 'image/x-ms-bmp'],
+    'tif' => ['image/tiff'],
+    'tiff' => ['image/tiff'],
+    'ico' => ['image/vnd.microsoft.icon', 'image/x-icon'],
+    'pdf' => ['application/pdf'],
+    'txt' => ['text/plain'],
+    'csv' => ['text/csv', 'text/plain'],
+    'rtf' => ['text/rtf', 'application/rtf'],
+    'doc' => ['application/msword', 'application/vnd.ms-office', 'application/CDFV2'],
+    'xls' => ['application/vnd.ms-excel', 'application/vnd.ms-office', 'application/CDFV2'],
+    'ppt' => ['application/vnd.ms-powerpoint', 'application/vnd.ms-office', 'application/CDFV2'],
+    'docx' => ['application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/zip'],
+    'xlsx' => ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/zip'],
+    'pptx' => ['application/vnd.openxmlformats-officedocument.presentationml.presentation', 'application/zip'],
+    'odt' => ['application/vnd.oasis.opendocument.text', 'application/zip'],
+    'ods' => ['application/vnd.oasis.opendocument.spreadsheet', 'application/zip'],
+    'odp' => ['application/vnd.oasis.opendocument.presentation', 'application/zip'],
+    'zip' => ['application/zip'],
+    'mp3' => ['audio/mpeg'],
+    'wav' => ['audio/x-wav', 'audio/wav'],
+    'ogg' => ['audio/ogg', 'video/ogg', 'application/ogg'],
+    'm4a' => ['audio/mp4', 'audio/x-m4a'],
+    'mp4' => ['video/mp4'],
+    'webm' => ['video/webm'],
+  ];
 
   public function __construct(private readonly MediaConfig $config) {}
 
@@ -39,7 +83,6 @@ final class Uploader
   {
     $originalName = $file->getClientOriginalName();
     $size = (int)$file->getSize();
-    $mime = $file->getClientMimeType();
 
     if ($this->config->maxWeight() * 1000000 < $size) {
       return UploadResult::fail(
@@ -49,7 +92,10 @@ final class Uploader
       );
     }
 
-    if (false === $this->isAuthorizedMime($mime)) {
+    $fi = new \SplFileInfo($originalName);
+    $ext = \strtolower($fi->getExtension());
+
+    if ('' === $ext || false === $this->isAuthorizedExtension($ext)) {
       return UploadResult::fail(
         'MEDIAMANAGER_ERROR_UPLOAD_FILE_UNAUTH_EXT',
         ['%authExts%' => \implode(', ', $this->config->authExts())],
@@ -57,7 +103,7 @@ final class Uploader
       );
     }
 
-    if (\in_array($mime, $this->config->mimesDocument, true)) {
+    if (true === $this->isDocumentExtension($ext)) {
       if ($this->config->maxWeightDocument * 1000000 < $size) {
         return UploadResult::fail(
           'MEDIAMANAGER_ERROR_UPLOAD_FILE_TOO_BIG',
@@ -67,11 +113,15 @@ final class Uploader
       }
     }
 
-    $fi = new \SplFileInfo($originalName);
-    $ext = \strtolower($fi->getExtension());
+    $ext = self::EXTENSION_ALIASES[$ext] ?? $ext;
+    $mime = $this->detectMime($file->getPathname());
 
-    if ('jpeg' === $ext) {
-      $ext = 'jpg';
+    if (false === $this->mimeBelongsTo($ext, $mime)) {
+      return UploadResult::fail(
+        'MEDIAMANAGER_ERROR_UPLOAD_EXTENSION',
+        ['%ext%' => $ext, '%mime%' => $mime],
+        $originalName,
+      );
     }
 
     $cleanFilename = $this->cleanFilename($fi->getBasename('.' . $fi->getExtension()));
@@ -119,19 +169,41 @@ final class Uploader
     return UploadResult::ok($originalName, $cleanFilename, $filename, \trim($relFolder, '/'));
   }
 
-  private function isAuthorizedMime(string $mime): bool
+  private function isAuthorizedExtension(string $ext): bool
   {
-    $validMimes = [];
+    return \in_array($ext, \array_map('strtolower', $this->config->authExts()), true);
+  }
 
-    foreach ($this->config->authMimes() as $authMime) {
-      $validMimes[] = \str_replace('/', '\/', $authMime);
-    }
+  private function isDocumentExtension(string $ext): bool
+  {
+    return \in_array($ext, \array_map('strtolower', $this->config->extsDocument), true);
+  }
 
-    if ([] === $validMimes) {
+  /**
+   * Does the mime read off the bytes fit the extension the file will carry ?
+   */
+  private function mimeBelongsTo(string $ext, string $mime): bool
+  {
+    if ('' === $mime) {
       return false;
     }
 
-    return 1 === \preg_match('/^(' . \implode(')|(', $validMimes) . ')$/i', $mime);
+    $accepted = self::EXTENSION_MIMES[$ext] ?? $this->config->authMimes();
+
+    foreach ($accepted as $candidate) {
+      if (0 === \strcasecmp($candidate, $mime)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  private function detectMime(string $path): string
+  {
+    $mime = @\mime_content_type($path);
+
+    return false === $mime ? '' : $mime;
   }
 
   /**

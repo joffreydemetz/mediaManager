@@ -137,7 +137,7 @@ class UploadTest extends TestCase
 
   // -- validation -----------------------------------------------------------
 
-  public function testUnauthorisedMimeIsRefused(): void
+  public function testAnExtensionOutsideTheListsIsRefused(): void
   {
     $result = $this->manager()->upload($this->uploadedRaw('script.exe', 'application/x-msdownload'), 'empty');
 
@@ -145,6 +145,84 @@ class UploadTest extends TestCase
     $this->assertSame('MEDIAMANAGER_ERROR_UPLOAD_FILE_UNAUTH_EXT', $result->key);
     $this->assertSame(['%authExts%' => 'pdf, png, gif, jpg, jpeg'], $result->params);
     $this->assertFileDoesNotExist($this->rootPath('empty/script.exe'));
+  }
+
+  public static function disguisedUploadProvider(): array
+  {
+    return [
+      'a PHP script announced as a PNG' => [
+        static fn(self $test) => $test->uploadedRaw('shell.phtml', 'image/png'),
+      ],
+      'an SVG, scripts and all' => [
+        static fn(self $test) => $test->uploadedRaw('x.svg', 'image/svg+xml'),
+      ],
+      'no extension at all' => [
+        static fn(self $test) => $test->uploadedPng('noext', 20, 20, 'image/png'),
+      ],
+    ];
+  }
+
+  #[DataProvider('disguisedUploadProvider')]
+  public function testTheClientMimeDoesNotLetAnExtensionIn(\Closure $file): void
+  {
+    $result = $this->manager()->upload($file($this), 'empty');
+
+    $this->assertFalse($result->isSuccess());
+    $this->assertSame('MEDIAMANAGER_ERROR_UPLOAD_FILE_UNAUTH_EXT', $result->key);
+    $this->assertSame([], \glob($this->rootPath('empty') . '/*'), 'nothing was stored');
+  }
+
+  public function testTheBytesMustMatchTheExtension(): void
+  {
+    // a real PNG, renamed .jpg : the client mime says jpeg, the bytes say png
+    $result = $this->manager()->upload($this->uploadedPng('photo.jpg', 20, 20, 'image/jpeg'), 'empty');
+
+    $this->assertFalse($result->isSuccess());
+    $this->assertSame('MEDIAMANAGER_ERROR_UPLOAD_EXTENSION', $result->key);
+    $this->assertSame(['%ext%' => 'jpg', '%mime%' => 'image/png'], $result->params);
+    $this->assertSame('photo.jpg', $result->originalName);
+    $this->assertFileDoesNotExist($this->rootPath('empty/photo.jpg'));
+  }
+
+  public function testTheClientMimeIsOnlyAHint(): void
+  {
+    // browsers and Dropzone get it wrong : the bytes decide
+    $result = $this->manager()->upload($this->uploadedPng('photo.png', 20, 20, 'application/octet-stream'), 'empty');
+
+    $this->assertTrue($result->isSuccess(), $result->key);
+    $this->assertFileExists($this->rootPath('empty/photo.png'));
+  }
+
+  public function testJfifIsStoredAsAJpg(): void
+  {
+    $manager = $this->manager(['extsImage' => ['png', 'gif', 'jpg', 'jpeg', 'jfif']]);
+
+    $result = $manager->upload($this->uploadedJpg('scan.jfif'), 'empty');
+
+    $this->assertTrue($result->isSuccess(), $result->key);
+    $this->assertSame('scan.jpg', $result->filename);
+    $this->assertFileExists($this->rootPath('empty/scan.jpg'));
+  }
+
+  public function testAnExtensionTheTableDoesNotKnowFallsBackOnTheConfiguredMimes(): void
+  {
+    $withMime = $this->manager(['extsDocument' => ['pdf', 'dat'], 'mimesDocument' => ['application/pdf', 'text/plain']]);
+    $withoutMime = $this->manager(['extsDocument' => ['pdf', 'dat'], 'mimesDocument' => ['application/pdf']]);
+
+    $this->assertTrue($withMime->upload($this->uploadedRaw('notes.dat', 'text/plain'), 'empty')->isSuccess());
+
+    $result = $withoutMime->upload($this->uploadedRaw('notes.dat', 'text/plain'), 'empty');
+
+    $this->assertFalse($result->isSuccess());
+    $this->assertSame('MEDIAMANAGER_ERROR_UPLOAD_EXTENSION', $result->key);
+    $this->assertSame(['%ext%' => 'dat', '%mime%' => 'text/plain'], $result->params);
+  }
+
+  public function testTheExtensionListIsMatchedCaseInsensitively(): void
+  {
+    $manager = $this->manager(['extsImage' => ['PNG']]);
+
+    $this->assertTrue($manager->upload($this->uploadedPng('Logo.png'), 'empty')->isSuccess());
   }
 
   public function testOversizedFileIsRefused(): void
@@ -198,9 +276,9 @@ class UploadTest extends TestCase
     $this->assertTrue($result->isSuccess());
   }
 
-  public function testNothingIsAuthorisedWithoutMimes(): void
+  public function testNothingIsAuthorisedWithoutExtensions(): void
   {
-    $manager = $this->manager(['mimesImage' => [], 'mimesDocument' => []]);
+    $manager = $this->manager(['extsImage' => [], 'extsDocument' => []]);
 
     $result = $manager->upload($this->uploadedPng('x.png'), 'empty');
 
@@ -244,12 +322,13 @@ class UploadTest extends TestCase
     $this->assertSame($expected, \array_slice(\getimagesize($this->rootPath('empty/image.png')), 0, 2));
   }
 
-  public function testAPictureThatIsNotReallyOneIsKeptAsIs(): void
+  public function testAPictureThatIsNotReallyOneIsRefused(): void
   {
     $result = $this->manager()->upload($this->uploadedRaw('fake.png', 'image/png', 64), 'empty');
 
-    $this->assertTrue($result->isSuccess());
-    $this->assertSame(\str_repeat('x', 64), \file_get_contents($this->rootPath('empty/fake.png')));
+    $this->assertFalse($result->isSuccess());
+    $this->assertSame('MEDIAMANAGER_ERROR_UPLOAD_EXTENSION', $result->key);
+    $this->assertFileDoesNotExist($this->rootPath('empty/fake.png'));
   }
 
   public function testAPictureThatCannotBeResizedIsKeptAsIs(): void
@@ -269,12 +348,13 @@ class UploadTest extends TestCase
 
   public function testDocumentsAreNeverTouched(): void
   {
-    $manager = $this->manager();
-    $file = $this->uploadedRaw('notice.pdf', 'application/pdf', 64);
+    $manager = $this->manager(['maxPictureLongSide' => 1]);
+    $file = $this->uploadedPdf('notice.pdf');
+    $size = $file->getSize();
 
     $result = $manager->upload($file, 'empty');
 
-    $this->assertTrue($result->isSuccess());
-    $this->assertSame(64, \filesize($this->rootPath('empty/notice.pdf')));
+    $this->assertTrue($result->isSuccess(), $result->key);
+    $this->assertSame($size, \filesize($this->rootPath('empty/notice.pdf')));
   }
 }
