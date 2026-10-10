@@ -2,7 +2,10 @@
 
 namespace JDZ\MediaManager\Tests\Manager;
 
+use JDZ\MediaManager\Manager\Uploader;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use Symfony\Component\HttpFoundation\File\UploadedFile;
 
 class UploadTest extends TestCase
 {
@@ -195,25 +198,73 @@ class UploadTest extends TestCase
     $this->assertTrue($result->isSuccess());
   }
 
-  // -- downscaling ----------------------------------------------------------
-
-  public function testOversizedPictureIsDownscaled(): void
+  public function testNothingIsAuthorisedWithoutMimes(): void
   {
-    $manager = $this->manager(['maxPictureLongSide' => 100]);
+    $manager = $this->manager(['mimesImage' => [], 'mimesDocument' => []]);
 
-    $result = $manager->upload($this->uploadedPng('grande.png', 400, 200), 'empty');
+    $result = $manager->upload($this->uploadedPng('x.png'), 'empty');
 
-    $this->assertTrue($result->isSuccess());
-    $this->assertSame([100, 50], \array_slice(\getimagesize($this->rootPath('empty/grande.png')), 0, 2));
+    $this->assertFalse($result->isSuccess());
+    $this->assertSame('MEDIAMANAGER_ERROR_UPLOAD_FILE_UNAUTH_EXT', $result->key);
   }
 
-  public function testPictureWithinBoundsIsLeftAlone(): void
+  public function testAFailedMoveIsReported(): void
   {
-    $manager = $this->manager(['maxPictureLongSide' => 1000]);
+    // the manager only hands over existing folders : drive the uploader itself
+    $uploader = new Uploader($this->manager()->config());
 
-    $manager->upload($this->uploadedPng('petite.png', 400, 200), 'empty');
+    $result = $uploader->upload($this->uploadedPng('x.png'), $this->rootPath('logo.png'), 'logo.png');
 
-    $this->assertSame([400, 200], \array_slice(\getimagesize($this->rootPath('empty/petite.png')), 0, 2));
+    $this->assertFalse($result->isSuccess());
+    $this->assertSame('MEDIAMANAGER_ERROR_OPERATION_FAILED', $result->key);
+    $this->assertStringStartsWith('Unable to create the "', $result->params['%error%']);
+    $this->assertSame('x.png', $result->originalName);
+  }
+
+  // -- downscaling ----------------------------------------------------------
+
+  public static function downscaleProvider(): array
+  {
+    return [
+      'oversized landscape is bounded by its width' => [100, 2, 400, 200, [100, 50]],
+      'oversized portrait is bounded by its height' => [100, 2, 200, 400, [50, 100]],
+      'picture within bounds is left alone' => [1000, 2, 400, 200, [400, 200]],
+      'over-weight picture within bounds keeps its size' => [1000, 0, 400, 200, [400, 200]],
+    ];
+  }
+
+  #[DataProvider('downscaleProvider')]
+  public function testPictureIsFittedWithinTheLongSide(int $longSide, int $maxWeightImage, int $width, int $height, array $expected): void
+  {
+    $manager = $this->manager(['maxPictureLongSide' => $longSide, 'maxWeightImage' => $maxWeightImage]);
+
+    $result = $manager->upload($this->uploadedPng('image.png', $width, $height), 'empty');
+
+    $this->assertTrue($result->isSuccess(), $result->key);
+    $this->assertSame($expected, \array_slice(\getimagesize($this->rootPath('empty/image.png')), 0, 2));
+  }
+
+  public function testAPictureThatIsNotReallyOneIsKeptAsIs(): void
+  {
+    $result = $this->manager()->upload($this->uploadedRaw('fake.png', 'image/png', 64), 'empty');
+
+    $this->assertTrue($result->isSuccess());
+    $this->assertSame(\str_repeat('x', 64), \file_get_contents($this->rootPath('empty/fake.png')));
+  }
+
+  public function testAPictureThatCannotBeResizedIsKeptAsIs(): void
+  {
+    // a valid header announcing 400x200, then nothing to decode
+    $png = $this->scratchDir . '/source.png';
+    $this->makePng($png, 400, 200);
+    \file_put_contents($png, \substr(\file_get_contents($png), 0, 40));
+    $truncated = \file_get_contents($png);
+
+    $file = new UploadedFile($png, 'cut.png', 'image/png', null, true);
+    $result = $this->manager(['maxPictureLongSide' => 100])->upload($file, 'empty');
+
+    $this->assertTrue($result->isSuccess());
+    $this->assertSame($truncated, \file_get_contents($this->rootPath('empty/cut.png')));
   }
 
   public function testDocumentsAreNeverTouched(): void

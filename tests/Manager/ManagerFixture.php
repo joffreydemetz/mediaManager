@@ -30,7 +30,7 @@ trait ManagerFixture
 
   protected function setUp(): void
   {
-    $this->baseDir = \str_replace('\\', '/', \sys_get_temp_dir()) . '/jdz-mm-' . \bin2hex(\random_bytes(4));
+    $this->baseDir = \str_replace('\\', '/', \sys_get_temp_dir()) . '/jdz-mediamanager-' . \uniqid();
     $this->rootDir = $this->baseDir . '/media';
     $this->protectDir = $this->baseDir . '/protect';
     $this->watermarkPath = $this->baseDir . '/watermark.png';

@@ -2,7 +2,9 @@
 
 namespace JDZ\MediaManager\Tests\Manager;
 
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use Symfony\Component\Filesystem\Filesystem;
 
 class FilesystemListingTest extends TestCase
 {
@@ -94,25 +96,28 @@ class FilesystemListingTest extends TestCase
     $this->assertSame(['empty', 'pages', 'photos'], \array_column($fs['folders'], 'name'));
   }
 
-  public function testImagesFilter(): void
+  public static function filterProvider(): array
   {
-    $fs = $this->manager()->getFilesystem('photos', 'images');
-
-    $this->assertSame(['a.jpg', 'b.png'], \array_column($fs['files'], 'name'));
+    return [
+      'images' => ['images', ['a.jpg', 'b.png']],
+      'documents' => ['documents', ['notes.pdf']],
+      'videos' => ['videos', ['clip.mp4']],
+      'audios' => ['audios', ['sound.wav']],
+      'no filter keeps everything' => ['', ['a.jpg', 'b.png', 'clip.mp4', 'notes.pdf', 'sound.wav']],
+      'an unknown filter keeps everything' => ['spreadsheets', ['a.jpg', 'b.png', 'clip.mp4', 'notes.pdf', 'sound.wav']],
+    ];
   }
 
-  public function testDocumentsFilter(): void
+  #[DataProvider('filterProvider')]
+  public function testFilterKeepsTheMatchingMimes(string $only, array $expected): void
   {
-    $fs = $this->manager()->getFilesystem('photos', 'documents');
+    $fs = new Filesystem();
+    $fs->dumpFile($this->rootPath('photos/clip.mp4'), "\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00mp42isom" . \str_repeat("\x00", 32));
+    $fs->dumpFile($this->rootPath('photos/sound.wav'), "RIFF\x24\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00\x44\xAC\x00\x00\x88\x58\x01\x00\x02\x00\x10\x00data\x00\x00\x00\x00");
 
-    $this->assertSame(['notes.pdf'], \array_column($fs['files'], 'name'));
-  }
+    $listing = $this->manager()->getFilesystem('photos', $only);
 
-  public function testNoFilterKeepsEverything(): void
-  {
-    $fs = $this->manager()->getFilesystem('photos', '');
-
-    $this->assertSame(['a.jpg', 'b.png', 'notes.pdf'], \array_column($fs['files'], 'name'));
+    $this->assertSame($expected, \array_column($listing['files'], 'name'));
   }
 
   public function testThumbResolverIsCalledForImagesOnlyWithTheRelativePath(): void

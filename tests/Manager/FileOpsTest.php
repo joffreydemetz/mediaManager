@@ -122,6 +122,14 @@ class FileOpsTest extends TestCase
     $this->assertFileExists($this->rootPath('a.jpg'));
   }
 
+  public function testMoveWithoutAFileFails(): void
+  {
+    $result = $this->manager()->moveFile('photos', '', 'empty');
+
+    $this->assertFalse($result->isSuccess());
+    $this->assertSame('MEDIAMANAGER_ERROR_NO_FILE_SPECIFIED', $result->key);
+  }
+
   public function testMoveToTheSameFolderFails(): void
   {
     $result = $this->manager()->moveFile('photos', 'a.jpg', 'photos');

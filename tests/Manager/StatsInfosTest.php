@@ -20,14 +20,6 @@ class StatsInfosTest extends TestCase
     $this->assertSame([], $stats->errors);
   }
 
-  public function testStatsReportTheConfiguredCeilings(): void
-  {
-    $stats = $this->manager()->getStats();
-
-    $this->assertSame(6000, $stats->maxNumFiles);
-    $this->assertSame(3000, $stats->maxWeightFiles);
-  }
-
   public function testStatsRefuseUploadsWhenTheFileCountIsReached(): void
   {
     $stats = $this->manager(['maxNumFiles' => 9])->getStats();

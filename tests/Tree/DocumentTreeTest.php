@@ -3,6 +3,7 @@
 namespace JDZ\MediaManager\Tests\Tree;
 
 use JDZ\MediaManager\Tree\DocumentTree;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 class DocumentTreeTest extends TestCase
@@ -42,7 +43,20 @@ class DocumentTreeTest extends TestCase
     $this->assertSame('../media/manual.pdf', $byId['manual.pdf']['url']);
   }
 
-  public function testIconMapping(): void
+  public static function iconProvider(): array
+  {
+    return [
+      'pdf' => ['report.pdf', 'pdf'],
+      'spreadsheet' => ['data.xlsx', 'xls'],
+      // presentations share the spreadsheet icon
+      'presentation' => ['slides.pptx', 'xls'],
+      'word processing' => ['letter.docx', 'doc'],
+      'anything else' => ['readme.txt', ''],
+    ];
+  }
+
+  #[DataProvider('iconProvider')]
+  public function testIconMapping(string $file, string $icon): void
   {
     $tree = (new DocumentTree())
       ->setBasePath($this->fixturePath())
@@ -51,9 +65,7 @@ class DocumentTreeTest extends TestCase
 
     $byId = array_column($tree, null, 'id');
 
-    $this->assertSame('pdf', $byId['report.pdf']['icon']);
-    $this->assertSame('xls', $byId['data.xlsx']['icon']);
-    $this->assertSame('xls', $byId['slides.pptx']['icon']);
+    $this->assertSame($icon, $byId[$file]['icon']);
   }
 
   public function testIgnoreListsAreHonored(): void

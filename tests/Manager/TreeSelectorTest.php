@@ -81,6 +81,14 @@ class TreeSelectorTest extends TestCase
     }
   }
 
+  public function testALibraryWhoseRootIsGoneHasNoFolders(): void
+  {
+    $manager = $this->manager(['rootPath' => $this->baseDir . '/gone']);
+
+    $this->assertSame([], $manager->getTree('')->children);
+    $this->assertSame([['value' => '', 'name' => 'Racine', 'level' => 0]], $manager->getFolderSelectList());
+  }
+
   // -- selector -------------------------------------------------------------
 
   public function testSelectorGroupsImagesPerFolder(): void

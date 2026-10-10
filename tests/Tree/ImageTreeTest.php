@@ -66,6 +66,18 @@ class ImageTreeTest extends TestCase
     $this->assertNotContains('root.gif', array_column($tree['files'] ?? [], 'id'));
   }
 
+  public function testFilterDecidesWhichFilesAreKept(): void
+  {
+    $tree = (new ImageTree())
+      ->setBasePath($this->fixturePath())
+      ->setBaseUrl('../media/')
+      ->setFilter('document')
+      ->getTree();
+
+    $this->assertSame(['manual.pdf'], array_column($tree['files'], 'id'));
+    $this->assertEqualsCanonicalizing(['docs', 'photos'], array_column($tree['folders'], 'label'));
+  }
+
   public function testFileEntryShape(): void
   {
     $tree = (new ImageTree())

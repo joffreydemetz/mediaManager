@@ -9,7 +9,7 @@ use Symfony\Component\Filesystem\Filesystem;
  *
  *   root.gif  manual.pdf  _draft.jpg
  *   photos/   a.jpg  b.png  notes.pdf
- *   docs/     report.pdf  data.xlsx  slides.pptx
+ *   docs/     report.pdf  data.xlsx  slides.pptx  letter.docx  readme.txt
  *   empty/
  *   _private/ secret.pdf
  */
@@ -19,7 +19,7 @@ trait TreeFixture
 
   protected function setUp(): void
   {
-    $this->fixtureDir = sys_get_temp_dir() . '/jdz-mm-tree-' . bin2hex(random_bytes(4));
+    $this->fixtureDir = sys_get_temp_dir() . '/jdz-mediamanager-' . uniqid();
 
     $files = [
       'root.gif',
@@ -31,6 +31,8 @@ trait TreeFixture
       'docs/report.pdf',
       'docs/data.xlsx',
       'docs/slides.pptx',
+      'docs/letter.docx',
+      'docs/readme.txt',
       '_private/secret.pdf',
     ];
 
